@@ -11,7 +11,6 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import com.example.autoglmclient.data.AutoGLMRequest
 import com.example.autoglmclient.network.RetrofitClient
 import com.example.autoglmclient.utils.ImageUtils
 import kotlinx.coroutines.Dispatchers
@@ -105,20 +104,72 @@ class MainActivity : AppCompatActivity() {
                 // 2.2 图片转 Base64
                 val base64Image = ImageUtils.bitmapToBase64(bitmap)
 
-                // 2.3 发送网络请求
-                val request = AutoGLMRequest(imageBase64 = base64Image)
-                val response = RetrofitClient.api.chatWithAutoGLM(request)
+// === 新增: 构造 Prompt (提示词) ===
+                val systemPrompt = """
+    你是一个 Android 手机自动化助手。
+    请根据屏幕截图，输出 JSON 格式的操作指令。
+    
+    输出格式 (必须是纯 JSON，不要用 markdown):
+    {
+      "thought": "简述要在屏幕什么位置做什么",
+      "action": "click", 
+      "params": [x, y]
+    }
+    
+    支持的 action:
+    1. "click": 点击。params: [x, y] (绝对坐标)
+    2. "swipe": 滑动。params: [start_x, start_y, end_x, end_y]
+    3. "back": 返回键。params: []
+    4. "home": 回桌面。params: []
+""".trimIndent()
+
+// === 修改: 构造大模型请求 ===
+                val requestData = com.example.autoglmclient.data.OpenAiRequest(
+                    messages = listOf(
+                        com.example.autoglmclient.data.Message(
+                            role = "user",
+                            content = listOf(
+                                com.example.autoglmclient.data.Content(type = "text", text = systemPrompt),
+                                com.example.autoglmclient.data.Content(
+                                    type = "image_url",
+                                    image_url = com.example.autoglmclient.data.ImageUrl(url = "data:image/jpeg;base64,$base64Image")
+                                )
+                            )
+                        )
+                    )
+                )
+
+// 2.3 发送请求
+                val response = RetrofitClient.api.chatWithAutoGLM(requestData)
 
                 withContext(Dispatchers.Main) {
                     if (response.isSuccessful && response.body() != null) {
-                        val result = response.body()!!
-                        Log.d("AutoGLM", "AI回复: ${result.thought}")
-                        Toast.makeText(this@MainActivity, "AI: ${result.thought}", Toast.LENGTH_SHORT).show()
+                        val body = response.body()!!
+                        if (!body.choices.isNullOrEmpty()) {
+                            // 获取 AI 回复的文本
+                            val contentStr = body.choices[0].message.content
+                            Log.d("AutoGLM", "AI原始回复: $contentStr")
 
-                        // 2.4 执行动作
-                        executeAIAction(result.action, result.params)
+                            try {
+                                // 清洗 JSON (去掉可能存在的 ```json 标记)
+                                val cleanJson = contentStr.replace("```json", "").replace("```", "").trim()
+
+                                // 解析 JSON
+                                val command = com.google.gson.Gson().fromJson(cleanJson, com.example.autoglmclient.data.AgentCommand::class.java)
+
+                                Toast.makeText(this@MainActivity, "AI: ${command.thought}", Toast.LENGTH_SHORT).show()
+                                // 执行动作
+                                executeAIAction(command.action, command.params)
+
+                            } catch (e: Exception) {
+                                Log.e("AutoGLM", "解析JSON失败", e)
+                                Toast.makeText(this@MainActivity, "AI返回格式错误", Toast.LENGTH_SHORT).show()
+                            }
+                        }
                     } else {
-                        Toast.makeText(this@MainActivity, "请求失败: ${response.code()}", Toast.LENGTH_LONG).show()
+                        val errorMsg = response.errorBody()?.string() ?: "未知错误"
+                        Log.e("AutoGLM", "请求失败: $errorMsg")
+                        Toast.makeText(this@MainActivity, "请求失败: ${response.code()}", Toast.LENGTH_SHORT).show()
                     }
                 }
             } catch (e: Exception) {
@@ -171,5 +222,19 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             Log.e("AutoGLM", "动作执行出错: ${e.message}")
         }
+    }
+    private fun cleanJson(input: String): String {
+        var result = input.trim()
+        // 去掉 markdown 代码块标记
+        if (result.startsWith("```json")) {
+            result = result.substring(7)
+        }
+        if (result.startsWith("```")) {
+            result = result.substring(3)
+        }
+        if (result.endsWith("```")) {
+            result = result.substring(0, result.length - 3)
+        }
+        return result.trim()
     }
 }
