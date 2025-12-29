@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">AutoGLMClient</string>
+    <string name="accessibility_service_description">AutoGLM 自动操作助手</string>
 </resources>
