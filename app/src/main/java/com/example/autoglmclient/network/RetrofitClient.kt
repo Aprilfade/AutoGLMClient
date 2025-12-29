@@ -1,8 +1,10 @@
 package com.example.autoglmclient.network
 
+import android.util.Log
 import com.example.autoglmclient.data.OpenAiRequest
 import com.example.autoglmclient.data.OpenAiResponse
 import okhttp3.OkHttpClient
+import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -18,23 +20,38 @@ interface AutoGLMApi {
 
 object RetrofitClient {
     // 智谱 AI 的 API 地址
-    private const val BASE_URL = "https://open.bigmodel.cn/api/"
+    private const val BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
 
     // !!! 请在这里填入你的 API Key !!!
-    // 格式通常是 "你的KEY.后缀"
-    private const val API_KEY = "你的_ZHIPU_API_KEY_粘贴在这里"
+    // TODO: 记得去 https://open.bigmodel.cn/usercenter/apikeys 获取并替换下面这个字符串
+    private const val API_KEY = "f7273b78b9b14f91bc4ea757afa5bda6.BDJv2RiDKT768747"
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(60, TimeUnit.SECONDS) // 图片上传可能较慢，延长时间
-        .readTimeout(60, TimeUnit.SECONDS)
-        .addInterceptor { chain ->
-            val request = chain.request().newBuilder()
-                .addHeader("Authorization", "Bearer $API_KEY")
-                .addHeader("Content-Type", "application/json")
-                .build()
-            chain.proceed(request)
+    private val client: OkHttpClient by lazy {
+        // 创建日志拦截器
+        val logging = HttpLoggingInterceptor { message ->
+            Log.d("API_LOG", message)
+        }.apply {
+            level = HttpLoggingInterceptor.Level.BODY // 打印具体的 Body 内容
         }
-        .build()
+
+        OkHttpClient.Builder()
+            .connectTimeout(60, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .addInterceptor(logging) // 添加日志拦截器
+            .addInterceptor { chain ->
+                // 运行时检查 API KEY
+                if (API_KEY.contains("粘贴在这里")) {
+                    throw IllegalArgumentException("请先在 RetrofitClient.kt 中配置正确的 API Key！")
+                }
+
+                val request = chain.request().newBuilder()
+                    .addHeader("Authorization", "Bearer $API_KEY")
+                    .addHeader("Content-Type", "application/json")
+                    .build()
+                chain.proceed(request)
+            }
+            .build()
+    }
 
     val api: AutoGLMApi by lazy {
         Retrofit.Builder()

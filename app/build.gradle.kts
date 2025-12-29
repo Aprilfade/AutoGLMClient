@@ -6,7 +6,7 @@ plugins {
 android {
     namespace = "com.example.autoglmclient"
     compileSdk {
-        version = release(36)
+        version = release(34)
     }
 
     defaultConfig {
