@@ -7,6 +7,7 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo // [新增]
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
@@ -14,6 +15,7 @@ import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
+import android.os.Build // [新增]
 import android.os.IBinder
 
 class ScreenCaptureService : Service() {
@@ -32,10 +34,20 @@ class ScreenCaptureService : Service() {
         super.onCreate()
         instance = this
         createNotificationChannel()
-        // 前台服务必须显示一个通知
-        startForeground(1, createNotification())
-    }
 
+        val notification = createNotification()
+
+        // [修改] 针对 Android 10+ (特别是 Android 14) 必须指定服务类型
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                1,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            )
+        } else {
+            startForeground(1, notification)
+        }
+    }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val resultCode = intent?.getIntExtra("RESULT_CODE", -1) ?: -1
         val resultData = intent?.getParcelableExtra<Intent>("DATA")
@@ -48,7 +60,7 @@ class ScreenCaptureService : Service() {
             return START_NOT_STICKY
         }
 
-        startProjection(resultCode, resultData, width, height, density)
+        startProjection(resultCode, resultData, intent.getIntExtra("WIDTH", 720), intent.getIntExtra("HEIGHT", 1280), intent.getIntExtra("DENSITY", 1))
         return START_STICKY
     }
 
