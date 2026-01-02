@@ -13,37 +13,37 @@ import retrofit2.http.POST
 import java.util.concurrent.TimeUnit
 
 interface AutoGLMApi {
-    // 智谱/OpenAI 的标准聊天接口路径
-    @POST("paas/v4/chat/completions")
+    // ⚠️ 修改点 1：私有部署通常兼容 OpenAI 格式，路径改为 "v1/chat/completions"
+    // 原来的 "paas/v4/..." 是智谱云端专用的
+    @POST("v1/chat/completions")
     suspend fun chatWithAutoGLM(@Body request: OpenAiRequest): Response<OpenAiResponse>
 }
 
 object RetrofitClient {
-    // 智谱 AI 的 API 地址
-    private const val BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
+    // ⚠️ 修改点 2：填入你的 AutoDL 公网地址
+    // 注意：
+    // 1. 必须以 "/" 结尾
+    // 2. 你的地址带端口 8443，不要漏掉
+    private const val BASE_URL = "https://u854750-89b3-f556f2ee.westc.gpuhub.com:8443/"
 
-    // !!! 请在这里填入你的 API Key !!!
-    // TODO: 记得去 https://open.bigmodel.cn/usercenter/apikeys 获取并替换下面这个字符串
-    private const val API_KEY = "f7273b78b9b14f91bc4ea757afa5bda6.BDJv2RiDKT768747"
+    // ⚠️ 修改点 3：私有服务器通常不需要特定 Key，填 "EMPTY" 即可
+    // (有些服务器如果设置了 API_KEY 环境变量，则需要对应填入，默认通常为空)
+    private const val API_KEY = "EMPTY"
 
     private val client: OkHttpClient by lazy {
         // 创建日志拦截器
         val logging = HttpLoggingInterceptor { message ->
             Log.d("API_LOG", message)
         }.apply {
-            level = HttpLoggingInterceptor.Level.BODY // 打印具体的 Body 内容
+            level = HttpLoggingInterceptor.Level.BODY
         }
 
         OkHttpClient.Builder()
-            .connectTimeout(60, TimeUnit.SECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)
-            .addInterceptor(logging) // 添加日志拦截器
+            // ⚠️ 修改点 4：私有服务器推理可能较慢（特别是9B模型），建议适当延长超时时间
+            .connectTimeout(240, TimeUnit.SECONDS)
+            .readTimeout(240, TimeUnit.SECONDS)
+            .addInterceptor(logging)
             .addInterceptor { chain ->
-                // 运行时检查 API KEY
-                if (API_KEY.contains("粘贴在这里")) {
-                    throw IllegalArgumentException("请先在 RetrofitClient.kt 中配置正确的 API Key！")
-                }
-
                 val request = chain.request().newBuilder()
                     .addHeader("Authorization", "Bearer $API_KEY")
                     .addHeader("Content-Type", "application/json")
@@ -55,7 +55,7 @@ object RetrofitClient {
 
     val api: AutoGLMApi by lazy {
         Retrofit.Builder()
-            .baseUrl(BASE_URL)
+            .baseUrl(BASE_URL) //
             .client(client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
