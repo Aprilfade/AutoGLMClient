@@ -5,14 +5,12 @@ plugins {
 
 android {
     namespace = "com.example.autoglmclient"
-    compileSdk {
-        version = release(34)
-    }
+    compileSdk = 34  // ✅ 注意这里：直接赋值，不要用花括号
 
     defaultConfig {
         applicationId = "com.example.autoglmclient"
         minSdk = 24
-        targetSdk = 36
+        targetSdk = 34 // ✅ 建议改成与 compileSdk 一致
         versionCode = 1
         versionName = "1.0"
 
@@ -29,14 +27,13 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
     }
     kotlinOptions {
-        jvmTarget = "11"
+        jvmTarget = "1.8"
     }
 }
-
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)

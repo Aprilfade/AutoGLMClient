@@ -15,7 +15,9 @@ import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.os.Handler // [新增]
 import android.os.IBinder
+import android.os.Looper  // [新增]
 import android.util.Log
 
 class ScreenCaptureService : Service() {
@@ -24,7 +26,7 @@ class ScreenCaptureService : Service() {
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
 
-    // [新增] 缓存上一帧成功的截图，防止屏幕静止时 acquireLatestImage 返回 null 导致任务失败
+    // 缓存上一帧成功的截图
     private var lastBitmap: Bitmap? = null
 
     companion object {
@@ -40,7 +42,7 @@ class ScreenCaptureService : Service() {
 
         val notification = createNotification()
 
-        // 针对 Android 10+ (特别是 Android 14) 必须指定服务类型
+        // Android 14 (SDK 34) 必须指定 FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 1,
@@ -60,7 +62,7 @@ class ScreenCaptureService : Service() {
         val density = intent?.getIntExtra("DENSITY", 320) ?: 320
 
         if (resultCode != -1 || resultData == null) {
-            Log.e("AutoGLM", "❌ 启动参数错误: resultCode=$resultCode, data=$resultData")
+            Log.e("AutoGLM", "❌ 启动参数错误: resultCode=$resultCode")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -79,7 +81,7 @@ class ScreenCaptureService : Service() {
                 return
             }
 
-            // [修复] 确保宽高是偶数 (对齐)，防止某些设备 ImageReader 崩溃或黑屏
+            // 确保宽高是偶数，防止对齐问题
             var safeWidth = if (w > 0) w else 720
             var safeHeight = if (h > 0) h else 1280
             if (safeWidth % 2 != 0) safeWidth--
@@ -90,21 +92,30 @@ class ScreenCaptureService : Service() {
             Log.d("AutoGLM", "正在启动录屏: ${safeWidth}x${safeHeight} dpi=$safeDpi")
 
             try {
-                // maxImages 设为 2，留有缓冲
+                // [修复点 1] 创建一个主线程 Handler
+                val handler = Handler(Looper.getMainLooper())
+
                 imageReader = ImageReader.newInstance(safeWidth, safeHeight, PixelFormat.RGBA_8888, 2)
 
-                // [修复] 增加 VIRTUAL_DISPLAY_FLAG_PUBLIC 提高兼容性
+                // [修复点 2] 极其重要：设置一个空的 Listener，这会强制 ImageReader 开始接收数据流
+                imageReader?.setOnImageAvailableListener({ reader ->
+                    // 这里可以留空，因为我们是主动 poll (acquireLatestImage)
+                    // 但必须设置 Listener 才能在某些设备上激活 VirtualDisplay 的输出
+                }, handler)
+
                 val virtualDisplayFlags = DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR or
                         DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC
 
+                // [修复点 3] 将 handler 传递给 createVirtualDisplay
                 virtualDisplay = mediaProjection?.createVirtualDisplay(
                     "AutoGLMScreen",
                     safeWidth, safeHeight, safeDpi,
                     virtualDisplayFlags,
                     imageReader?.surface,
-                    null, null
+                    null,
+                    handler // 传入 handler
                 )
-                Log.d("AutoGLM", "✅ 录屏服务启动成功")
+                Log.d("AutoGLM", "✅ 录屏服务启动成功，等待画面...")
             } catch (e: Exception) {
                 e.printStackTrace()
                 Log.e("AutoGLM", "❌ ImageReader/VirtualDisplay 创建失败: ${e.message}")
@@ -115,23 +126,22 @@ class ScreenCaptureService : Service() {
         }
     }
 
-    // === 核心方法: 获取最新一帧截图 ===
     fun getLatestBitmap(): Bitmap? {
         val reader = imageReader
         if (reader == null) {
-            Log.e("AutoGLM", "⚠️ 尝试获取截图但 ImageReader 为 null")
+            Log.e("AutoGLM", "⚠️ getLatestBitmap: ImageReader 为 null (可能服务未正确启动)")
             return null
         }
 
-        // acquireLatestImage 获取最新的一帧
-        // 如果屏幕静止，可能没有新帧产生，此时返回 null 是正常的
+        // 获取最新的一帧
         val image = reader.acquireLatestImage()
 
         if (image == null) {
-            // [新增] 如果拿不到新帧，返回上一帧缓存 (解决屏幕静止时截图失败的问题)
             if (lastBitmap != null) {
                 return lastBitmap
             }
+            // 只有在完全没有拿到过图片时才会打印这个 Log，避免刷屏
+            Log.w("AutoGLM", "⚠️ getLatestBitmap: acquireLatestImage 返回 null 且无缓存")
             return null
         }
 
@@ -142,7 +152,6 @@ class ScreenCaptureService : Service() {
             val rowStride = planes[0].rowStride
             val rowPadding = rowStride - pixelStride * image.width
 
-            // 创建 Bitmap
             val bitmap = Bitmap.createBitmap(
                 image.width + rowPadding / pixelStride,
                 image.height,
@@ -150,18 +159,15 @@ class ScreenCaptureService : Service() {
             )
             bitmap.copyPixelsFromBuffer(buffer)
 
-            // 裁剪掉因为 rowStride 对齐可能产生的多余右边距
             val finalBitmap = Bitmap.createBitmap(bitmap, 0, 0, image.width, image.height)
 
-            // [新增] 更新缓存
             lastBitmap = finalBitmap
             return finalBitmap
         } catch (e: Exception) {
             e.printStackTrace()
             Log.e("AutoGLM", "❌ 图片转换 Bitmap 异常: ${e.message}")
-            return lastBitmap // 异常时也尝试返回缓存
+            return lastBitmap
         } finally {
-            // !!! 极其重要: 必须关闭 image，否则 ImageReader 会卡死
             image.close()
         }
     }
