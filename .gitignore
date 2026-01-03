@@ -1,15 +1,43 @@
-# Android Studio 项目配置 (忽略整个文件夹)
-.idea/
+# === Android Studio 核心忽略 ===
 *.iml
-local.properties
-
-# 构建产物 (忽略所有层级的 build 文件夹)
 .gradle/
-build/
-app/build/
-
-# 其它系统或生成文件
+.idea/
+local.properties
 .DS_Store
+/build
 /captures
 .externalNativeBuild
 .cxx
+.navigation/
+
+# === 编译产物 (最重要) ===
+# 忽略所有模块下的 build 文件夹
+**/build/
+
+# === 敏感文件 (严禁上传) ===
+# 签名秘钥 (非常危险，绝对不能上传)
+*.jks
+*.keystore
+*.pem
+*.p12
+key.properties
+
+# Google 服务配置 (如果用了 Firebase，通常包含 API Key)
+google-services.json
+GoogleService-Info.plist
+
+# === 临时/缓存文件 ===
+/app/release/
+/app/debug/
+.profiler/
+*.hprof
+*.apk
+*.aab
+/app/src/main/res/mipmap-anydpi-v26/
+/app/src/main/res/mipmap-hdpi/
+/app/src/main/res/mipmap-mdpi/
+/app/src/main/res/mipmap-xhdpi/
+/app/src/main/res/mipmap-xxhdpi/
+/app/src/main/res/mipmap-xxxhdpi/
+/app/src/androidTest/
+/app/src/test/
