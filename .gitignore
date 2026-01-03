@@ -1,15 +1,15 @@
+# Android Studio 项目配置 (忽略整个文件夹)
+.idea/
 *.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
+local.properties
+
+# 构建产物 (忽略所有层级的 build 文件夹)
+.gradle/
+build/
+app/build/
+
+# 其它系统或生成文件
 .DS_Store
-/build
 /captures
 .externalNativeBuild
 .cxx
-local.properties

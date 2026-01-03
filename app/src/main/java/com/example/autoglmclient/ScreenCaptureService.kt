@@ -49,13 +49,13 @@ class ScreenCaptureService : Service() {
         }
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val resultCode = intent?.getIntExtra("RESULT_CODE", -1) ?: -1
+        val resultCode = intent?.getIntExtra("RESULT_CODE", 0) ?: 0
         val resultData = intent?.getParcelableExtra<Intent>("DATA")
         val width = intent?.getIntExtra("WIDTH", 720) ?: 720
         val height = intent?.getIntExtra("HEIGHT", 1280) ?: 1280
         val density = intent?.getIntExtra("DENSITY", 1) ?: 1
 
-        if (resultCode == -1 || resultData == null) {
+        if (resultCode != -1 || resultData == null) {
             stopSelf()
             return START_NOT_STICKY
         }
@@ -65,22 +65,36 @@ class ScreenCaptureService : Service() {
     }
 
     private fun startProjection(code: Int, data: Intent, w: Int, h: Int, dpi: Int) {
-        val mpManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        mediaProjection = mpManager.getMediaProjection(code, data)
+        try {
+            val mpManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            mediaProjection = mpManager.getMediaProjection(code, data)
 
-        // 创建 ImageReader (注意: RGBA_8888 格式)
-        // maxImages = 2 以便获取最新帧
-        imageReader = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 2)
+            // ⚠️ 修复闪退点 1: 确保宽高不为 0
+            val safeWidth = if (w > 0) w else 720
+            val safeHeight = if (h > 0) h else 1280
+            // ⚠️ 修复闪退点 2: 确保 density 不为 0
+            val safeDpi = if (dpi > 0) dpi else 320
 
-        virtualDisplay = mediaProjection?.createVirtualDisplay(
-            "AutoGLMScreen",
-            w, h, dpi,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            imageReader?.surface,
-            null, null
-        )
+            // ⚠️ 修复闪退点 3: 加上 try-catch 防止 ImageReader 创建失败
+            try {
+                imageReader = ImageReader.newInstance(safeWidth, safeHeight, PixelFormat.RGBA_8888, 2)
+                virtualDisplay = mediaProjection?.createVirtualDisplay(
+                    "AutoGLMScreen",
+                    safeWidth, safeHeight, safeDpi,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    imageReader?.surface,
+                    null, null
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
+                android.util.Log.e("AutoGLM", "ImageReader 创建失败: ${e.message}")
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            // 这里捕获所有异常，防止 App 闪退到桌面
+            android.util.Log.e("AutoGLM", "❌ 录屏服务启动严重错误: ${e.message}")
+        }
     }
-
     // === 核心方法: 获取最新一帧截图 ===
     fun getLatestBitmap(): Bitmap? {
         val reader = imageReader ?: return null

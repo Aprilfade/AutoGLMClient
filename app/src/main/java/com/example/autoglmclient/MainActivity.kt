@@ -50,11 +50,16 @@ class MainActivity : AppCompatActivity() {
 
         mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
 
-        // 按钮 1: 开启录屏权限
+        // 按钮 1: 开启权限（逻辑升级）
         findViewById<Button>(R.id.btn_open_settings).setOnClickListener {
+            // 先检查无障碍服务
+            if (!checkAndOpenAccessibility()) {
+                return@setOnClickListener // 如果没开，先去开无障碍，不执行后面
+            }
+
+            // 如果无障碍已经开了，再请求录屏权限
             requestScreenCapture()
         }
-
         // 获取 UI 控件
         val btnStart = findViewById<Button>(R.id.btn_start_auto)
         val btnStop = findViewById<Button>(R.id.btn_stop_auto)
@@ -97,12 +102,15 @@ class MainActivity : AppCompatActivity() {
 
     // === 核心循环逻辑 ===
     private fun startAutoLoop(goal: String) {
-        if (ScreenCaptureService.instance == null) {
-            appendLog("❌ 请先点击按钮1开启录屏权限")
+        // 检查无障碍服务
+        if (AutoGLMService.instance == null) {
+            appendLog("❌ 无障碍服务未启动！正在跳转设置...")
+            checkAndOpenAccessibility() // 自动跳转
             return
         }
-        if (AutoGLMService.instance == null) {
-            appendLog("❌ 无障碍服务未启动！请去设置中开启 AutoGLM 服务")
+        // 检查录屏服务
+        if (ScreenCaptureService.instance == null) {
+            appendLog("❌ 录屏权限未开启（或服务已崩溃），请点击按钮 1 重试")
             return
         }
 
@@ -285,5 +293,17 @@ class MainActivity : AppCompatActivity() {
             result = result.substring(0, result.length - 3)
         }
         return result.trim()
+    }
+
+    // 检查无障碍服务是否开启，未开启则跳转设置
+    private fun checkAndOpenAccessibility(): Boolean {
+        if (AutoGLMService.instance == null) {
+            Toast.makeText(this, "请在设置中开启 [AutoGLMClient] 无障碍服务", Toast.LENGTH_LONG).show()
+            val intent = Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
+            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            startActivity(intent)
+            return false
+        }
+        return true
     }
 }
