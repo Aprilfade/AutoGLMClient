@@ -233,6 +233,7 @@ class MainActivity : AppCompatActivity() {
         screenCaptureLauncher.launch(captureIntent)
     }
 
+    @Suppress("DEPRECATION") // ✅ 添加这一行
     private fun startScreenCaptureService(resultCode: Int, data: Intent) {
         val metrics = DisplayMetrics()
         windowManager.defaultDisplay.getRealMetrics(metrics)
@@ -248,6 +249,7 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, "AutoGLM 眼睛已准备就绪", Toast.LENGTH_SHORT).show()
     }
 
+    @Suppress("DEPRECATION") // ✅ 添加这一行
     private fun executeAIAction(action: String?, params: List<Int>?) {
         val service = AutoGLMService.instance ?: return
         val metrics = DisplayMetrics()
