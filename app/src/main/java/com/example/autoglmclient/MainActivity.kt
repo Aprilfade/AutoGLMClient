@@ -74,6 +74,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     // === System Prompt ===
+// === System Prompt ===
     private fun getSystemPrompt(goal: String): String {
         return """
             你是一个 Android 手机自动化助手。
@@ -84,17 +85,22 @@ class MainActivity : AppCompatActivity() {
             输出格式说明（请严格遵守）：
             1. 打开应用: do(action="Launch", app="应用名称")
             2. 点击操作: do(action="Tap", element=[x,y])
-            3. 滑动操作: do(action="Swipe", start=[x1,y1], end=[x2,y2])
-            4. 返回操作: do(action="Back")
-            5. 回主桌面: do(action="Home")
-            6. 任务完成: finish(message="完成")
+            3. 输入文本: do(action="Input", text="搜索关键词")
+            4. 滑动操作: do(action="Swipe", start=[x1,y1], end=[x2,y2])
+            5. 返回操作: do(action="Back")
+            6. 回主桌面: do(action="Home")
+            7. 任务完成: finish(message="完成")
+            
+            【重要策略 - 必须执行】：
+            1. **禁止在设置页面通过滑动（Swipe）来查找选项，这太慢了！**
+            2. **必须优先点击顶部的“搜索设置项”输入框。**
+            3. 如果已经点击了搜索框（键盘已弹出或出现光标），**立即使用 Input 指令输入任务关键词（例如：彩铃）。**
+            4. 输入后，点击搜索结果列表中的对应项。
             
             注意：
-            - 如果目标应用未打开，请优先使用 Launch 指令直接打开它。
             - 坐标 (x,y) 请使用 0-1000 的相对坐标系。
         """.trimIndent()
     }
-
     private fun startAutoLoop(goal: String) {
         if (AutoGLMService.instance == null) {
             appendLog("❌ 无障碍服务未启动！")
@@ -203,7 +209,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // [关键修改 2] 解析 Launch 指令
+    // [关键修改 2] 解析 Launch 和 Input 指令
     private fun parseCommandFromText(text: String): AgentCommand? {
         try {
             // 匹配 action="..."
@@ -214,6 +220,7 @@ class MainActivity : AppCompatActivity() {
                 val action = actionMatcher.group(1) ?: return null
                 val params = mutableListOf<Int>()
                 var appName: String? = null
+                var inputText: String? = null
 
                 // 匹配坐标 [123, 456]
                 val coordPattern = Pattern.compile("\\[(\\d+),\\s*(\\d+)\\]")
@@ -223,14 +230,21 @@ class MainActivity : AppCompatActivity() {
                     params.add(coordMatcher.group(2).toInt())
                 }
 
-                // [新增] 匹配 App 名称 app="QQ音乐"
+                // 匹配 App 名称
                 val appPattern = Pattern.compile("app=\"([^\"]+)\"")
                 val appMatcher = appPattern.matcher(text)
                 if (appMatcher.find()) {
                     appName = appMatcher.group(1)
                 }
 
-                return AgentCommand(thought = text, action = action, params = params, appName = appName)
+                // [新增] 匹配输入文本 text="..."
+                val textPattern = Pattern.compile("text=\"([^\"]+)\"")
+                val textMatcher = textPattern.matcher(text)
+                if (textMatcher.find()) {
+                    inputText = textMatcher.group(1)
+                }
+
+                return AgentCommand(thought = text, action = action, params = params, appName = appName, text = inputText)
             } else if (text.contains("finish")) {
                 return AgentCommand(thought = text, action = "finish", params = emptyList())
             }
@@ -241,7 +255,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // [关键修改 3] 执行 Launch 操作
+    // [关键修改 3] 执行 Launch 和 Input 操作
     private fun executeAIAction(command: AgentCommand) {
         val service = AutoGLMService.instance ?: return
         val metrics = DisplayMetrics()
@@ -250,10 +264,16 @@ class MainActivity : AppCompatActivity() {
         try {
             when (command.action.lowercase()) {
                 "launch" -> {
-                    // 尝试根据名字打开 App
                     val appName = command.appName
                     if (!appName.isNullOrBlank()) {
                         launchAppByName(appName)
+                    }
+                }
+                // [新增] 处理 Input 指令
+                "input" -> {
+                    val text = command.text
+                    if (!text.isNullOrBlank()) {
+                        service.performInput(text)
                     }
                 }
                 "click", "tap" -> {
@@ -286,15 +306,32 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val pm = context.packageManager
-
                 withContext(Dispatchers.Main) {
                     appendLog("🔍 正在查找应用: $appName")
                 }
 
+                // =============================================================
+                // [新增修复逻辑] 特殊处理“设置”和“系统设置”
+                // 日志显示模型喜欢说 "系统设置"，所以这里必须包含它
+                // =============================================================
+                val isSettings = appName == "设置" ||
+                        appName == "系统设置" ||
+                        appName.equals("Settings", ignoreCase = true)
+
+                if (isSettings) {
+                    val intent = Intent(android.provider.Settings.ACTION_SETTINGS)
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(intent)
+                    withContext(Dispatchers.Main) {
+                        appendLog("🚀 已直接启动系统设置")
+                    }
+                    return@launch
+                }
+                // =============================================================
+
+                val pm = context.packageManager
                 // 获取应用列表
                 val packages = pm.getInstalledPackages(0)
-
                 var targetPackage: String? = null
 
                 // 1. 先尝试精确匹配
@@ -310,6 +347,7 @@ class MainActivity : AppCompatActivity() {
                 if (targetPackage == null) {
                     for (packageInfo in packages) {
                         val label = packageInfo.applicationInfo.loadLabel(pm).toString()
+                        // 修改：忽略大小写，且防止 label 为空
                         if (label.contains(appName, ignoreCase = true)) {
                             targetPackage = packageInfo.packageName
                             break
@@ -321,16 +359,14 @@ class MainActivity : AppCompatActivity() {
                     val intent = pm.getLaunchIntentForPackage(targetPackage)
                     if (intent != null) {
                         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        // [关键修改 2] 使用 Service Context 启动
                         context.startActivity(intent)
 
                         withContext(Dispatchers.Main) {
                             appendLog("🚀 已发送启动指令: $appName")
-                            // 启动后稍微多等一会儿，确保应用加载出来
                         }
                     } else {
                         withContext(Dispatchers.Main) {
-                            appendLog("❌ 无法获取启动 Intent")
+                            appendLog("❌ 无法获取启动 Intent: $targetPackage")
                         }
                     }
                 } else {

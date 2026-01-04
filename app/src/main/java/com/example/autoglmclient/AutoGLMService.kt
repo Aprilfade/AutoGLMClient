@@ -6,6 +6,7 @@ import android.accessibilityservice.GestureDescription
 import android.graphics.Path
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 
 class AutoGLMService : AccessibilityService() {
 
@@ -63,6 +64,42 @@ class AutoGLMService : AccessibilityService() {
             "back" -> performGlobalAction(GLOBAL_ACTION_BACK)
             "home" -> performGlobalAction(GLOBAL_ACTION_HOME)
             "recent" -> performGlobalAction(GLOBAL_ACTION_RECENTS)
+        }
+    }
+    // [新增] 动作 4: 输入文本
+    fun performInput(text: String) {
+        val root = rootInActiveWindow ?: return
+
+        // 1. 尝试找当前获得焦点的输入框
+        var targetNode = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+
+        // 2. 如果没找到焦点，尝试搜索所有 EditText 节点
+        if (targetNode == null) {
+            val editableNodes = root.findAccessibilityNodeInfosByViewId("android:id/search_src_text") // 常见搜索框ID
+            if (editableNodes.isNullOrEmpty()) {
+                // 广撒网找可编辑节点
+                val allNodes = ArrayList<AccessibilityNodeInfo>()
+                fun traverse(node: AccessibilityNodeInfo) {
+                    if (node.isEditable) allNodes.add(node)
+                    for (i in 0 until node.childCount) {
+                        node.getChild(i)?.let { traverse(it) }
+                    }
+                }
+                traverse(root)
+                if (allNodes.isNotEmpty()) targetNode = allNodes[0]
+            } else {
+                targetNode = editableNodes[0]
+            }
+        }
+
+        if (targetNode != null) {
+            val arguments = android.os.Bundle()
+            arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+            targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+            targetNode.recycle()
+            Log.d("AutoGLM", "已输入文本: $text")
+        } else {
+            Log.e("AutoGLM", "❌ 未找到可输入的输入框")
         }
     }
 }

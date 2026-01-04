@@ -40,9 +40,11 @@ data class MessageContent(
 // === 3. 本地解析用的简单模型 ===
 // 模型返回的文本我们会尝试解析成这个结构
 // === 3. 本地解析用的简单模型 ===
+// 修改后的 AgentCommand 类
 data class AgentCommand(
     val thought: String,
     val action: String,
     val params: List<Int>,
-    val appName: String? = null // [新增] 用于存储 Launch 指令的 App 名称
+    val appName: String? = null,
+    val text: String? = null // [新增] 用于存储 Input 指令的文本
 )
