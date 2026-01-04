@@ -2,7 +2,8 @@ package com.example.autoglmclient.data
 
 // === 1. 请求结构 (OpenAI/Zhipu 兼容格式) ===
 data class OpenAiRequest(
-    val model: String = "glm-4v", // 或者 "gpt-4o"
+    // [修改点] 默认模型改为 autoglm-phone
+    val model: String = "autoglm-phone",
     val messages: List<Message>,
     val temperature: Double = 0.1, // 低温度以保证指令准确
     val max_tokens: Int = 1024
@@ -38,8 +39,10 @@ data class MessageContent(
 
 // === 3. 本地解析用的简单模型 ===
 // 模型返回的文本我们会尝试解析成这个结构
+// === 3. 本地解析用的简单模型 ===
 data class AgentCommand(
     val thought: String,
     val action: String,
-    val params: List<Int>
+    val params: List<Int>,
+    val appName: String? = null // [新增] 用于存储 Launch 指令的 App 名称
 )

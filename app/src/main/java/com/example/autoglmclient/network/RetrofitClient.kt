@@ -13,23 +13,17 @@ import retrofit2.http.POST
 import java.util.concurrent.TimeUnit
 
 interface AutoGLMApi {
-    // ⚠️ 修改点 1：私有部署通常兼容 OpenAI 格式，路径改为 "v1/chat/completions"
-    // 原来的 "paas/v4/..." 是智谱云端专用的
-    @POST("v1/chat/completions")
+    // [修改点 1] 智谱 API 的路径通常是 chat/completions (BaseUrl 包含了 /paas/v4/)
+    @POST("chat/completions")
     suspend fun chatWithAutoGLM(@Body request: OpenAiRequest): Response<OpenAiResponse>
 }
-
 object RetrofitClient {
-    // ⚠️ 修改点 2：填入你的 AutoDL 公网地址
-    // 注意：
-    // 1. 必须以 "/" 结尾
-    // 2. 你的地址带端口 8443，不要漏掉
-    private const val BASE_URL = "https://u854750-89b3-f556f2ee.westc.gpuhub.com:8443/"
+    // [修改点 2] 修改为智谱大模型的 Base URL，务必以 "/" 结尾
+    private const val BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
 
-    // ⚠️ 修改点 3：私有服务器通常不需要特定 Key，填 "EMPTY" 即可
-    // (有些服务器如果设置了 API_KEY 环境变量，则需要对应填入，默认通常为空)
-    private const val API_KEY = "EMPTY"
-
+    // [修改点 3] 填入你的智谱 API Key
+    // 请将 "your-bigmodel-api-key" 替换为你真实的 Key
+    private const val API_KEY = "f7273b78b9b14f91bc4ea757afa5bda6.BDJv2RiDKT768747"
     private val client: OkHttpClient by lazy {
         // 创建日志拦截器
         val logging = HttpLoggingInterceptor { message ->
