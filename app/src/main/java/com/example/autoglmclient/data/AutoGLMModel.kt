@@ -2,8 +2,8 @@ package com.example.autoglmclient.data
 
 // === 1. 请求结构 (OpenAI/Zhipu 兼容格式) ===
 data class OpenAiRequest(
-    // [修改点] 默认模型改为 autoglm-phone
-    val model: String = "autoglm-phone",
+    // [修改点] 默认模型改为 autoglm-phone-9b（对应vLLM服务器的模型名称）
+    val model: String = "autoglm-phone-9b",
     val messages: List<Message>,
     val temperature: Double = 0.1, // 低温度以保证指令准确
     val max_tokens: Int = 1024

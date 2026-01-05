@@ -61,6 +61,9 @@ class MainActivity : AppCompatActivity() {
         val btnStop = findViewById<Button>(R.id.btn_stop_auto)
         val etGoal = findViewById<EditText>(R.id.et_goal)
 
+        // [修改] 设置默认任务
+        etGoal.setText("打开设置，搜索视频彩铃")
+
         btnStart.setOnClickListener {
             val goal = etGoal.text.toString()
             if (goal.isBlank()) {
@@ -77,28 +80,28 @@ class MainActivity : AppCompatActivity() {
 // === System Prompt ===
     private fun getSystemPrompt(goal: String): String {
         return """
-            你是一个 Android 手机自动化助手。
-            当前用户的任务目标是：【 $goal 】
-            
-            请根据屏幕截图，输出下一步要执行的操作。
-            
-            输出格式说明（请严格遵守）：
-            1. 打开应用: do(action="Launch", app="应用名称")
-            2. 点击操作: do(action="Tap", element=[x,y])
-            3. 输入文本: do(action="Input", text="搜索关键词")
-            4. 滑动操作: do(action="Swipe", start=[x1,y1], end=[x2,y2])
-            5. 返回操作: do(action="Back")
-            6. 回主桌面: do(action="Home")
-            7. 任务完成: finish(message="完成")
-            
-            【重要策略 - 必须执行】：
-            1. **禁止在设置页面通过滑动（Swipe）来查找选项，这太慢了！**
-            2. **必须优先点击顶部的“搜索设置项”输入框。**
-            3. 如果已经点击了搜索框（键盘已弹出或出现光标），**立即使用 Input 指令输入任务关键词（例如：彩铃）。**
-            4. 输入后，点击搜索结果列表中的对应项。
-            
-            注意：
-            - 坐标 (x,y) 请使用 0-1000 的相对坐标系。
+            任务：打开设置，搜索并关闭视频彩铃
+
+            【固定步骤】：
+            1. 在桌面：do(action="Launch", app="设置")
+            2. 在设置页面：找到"搜索设置项"输入框，do(action="Tap", element=[输入框坐标])
+            3. 键盘弹出后：立即 do(action="Input", text="视频")，不要点击键盘字母！
+            4. 出现搜索结果：do(action="Tap", element=[视频相关选项坐标])
+            5. 找到彩铃开关：do(action="Tap", element=[开关坐标])
+            6. 完成：finish(message="完成")
+
+            【关键规则】：
+            - 看到键盘立即用Input，禁止点击键盘字母！
+            - 看到搜索框立即点击，不要犹豫！
+            - 输入的是"视频"两个字，不是"彩铃"！
+
+            指令格式：
+            do(action="Launch", app="设置")
+            do(action="Tap", element=[x,y])
+            do(action="Input", text="视频")
+            finish(message="完成")
+
+            只输出一条指令！
         """.trimIndent()
     }
     private fun startAutoLoop(goal: String) {
@@ -122,7 +125,7 @@ class MainActivity : AppCompatActivity() {
             // [关键修改 1] 启动后先回桌面，防止模型看着自己的界面发呆
             withContext(Dispatchers.Main) { appendLog("🏠 正在返回桌面，准备开始...") }
             AutoGLMService.instance?.performGlobalActionStr("home")
-            delay(2000) // 多给点时间让动画结束
+            delay(3500) // [修改] 延长等待时间，确保回桌面动画完成并且截图更新
 
             var stepCount = 0
             val maxSteps = 20
@@ -140,12 +143,14 @@ class MainActivity : AppCompatActivity() {
                     }
                     val base64Image = ImageUtils.bitmapToBase64(bitmap)
 
-                    // 2. 构建请求
-                    val currentMessages = listOf(
+                    // 2. [关键修改] 每次都是全新独立请求，不使用对话历史
+                    // 构建单次请求消息
+                    val messages = listOf(
                         Message(
                             role = "user",
                             content = listOf(
                                 Content(type = "text", text = getSystemPrompt(goal)),
+                                Content(type = "text", text = "当前截图第${stepCount}步，只输出一条指令："),
                                 Content(type = "image_url", image_url = ImageUrl("data:image/jpeg;base64,$base64Image"))
                             )
                         )
@@ -153,8 +158,8 @@ class MainActivity : AppCompatActivity() {
 
                     withContext(Dispatchers.Main) { appendLog("🔄 第 $stepCount 步: 思考中...") }
 
-                    // 3. 发送给大模型
-                    val requestData = OpenAiRequest(messages = currentMessages)
+                    // 3. 发送单次请求给大模型
+                    val requestData = OpenAiRequest(messages = messages)
                     val response = RetrofitClient.api.chatWithAutoGLM(requestData)
 
                     if (response.isSuccessful && response.body() != null) {
@@ -166,6 +171,9 @@ class MainActivity : AppCompatActivity() {
                             val command = parseCommandFromText(contentStr)
 
                             withContext(Dispatchers.Main) {
+                                // [新增] 打印模型原始回复（前50字符）
+                                appendLog("📝 模型回复: ${contentStr.take(50)}...")
+
                                 // 打印简略日志
                                 if (command != null) {
                                     val logMsg = if (command.action == "Launch")
@@ -209,12 +217,24 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // [关键修改 2] 解析 Launch 和 Input 指令
+    // [关键修改 2] 解析 Launch 和 Input 指令（增强版，支持从长文本中提取）
     private fun parseCommandFromText(text: String): AgentCommand? {
         try {
+            // [新增] 首先尝试查找最后一个 do(...) 或 finish(...) 指令
+            val doPattern = Pattern.compile("do\\s*\\(.*?\\)", Pattern.DOTALL)
+            val doMatcher = doPattern.matcher(text)
+
+            var lastDoCommand: String? = null
+            while (doMatcher.find()) {
+                lastDoCommand = doMatcher.group()
+            }
+
+            // 如果找到了 do(...) 指令，解析它
+            val textToParse = lastDoCommand ?: text
+
             // 匹配 action="..."
-            val actionPattern = Pattern.compile("action=\"([^\"]+)\"")
-            val actionMatcher = actionPattern.matcher(text)
+            val actionPattern = Pattern.compile("action\\s*=\\s*\"([^\"]+)\"")
+            val actionMatcher = actionPattern.matcher(textToParse)
 
             if (actionMatcher.find()) {
                 val action = actionMatcher.group(1) ?: return null
@@ -223,29 +243,29 @@ class MainActivity : AppCompatActivity() {
                 var inputText: String? = null
 
                 // 匹配坐标 [123, 456]
-                val coordPattern = Pattern.compile("\\[(\\d+),\\s*(\\d+)\\]")
-                val coordMatcher = coordPattern.matcher(text)
+                val coordPattern = Pattern.compile("\\[(\\d+)\\s*,\\s*(\\d+)\\]")
+                val coordMatcher = coordPattern.matcher(textToParse)
                 while (coordMatcher.find()) {
                     params.add(coordMatcher.group(1).toInt())
                     params.add(coordMatcher.group(2).toInt())
                 }
 
                 // 匹配 App 名称
-                val appPattern = Pattern.compile("app=\"([^\"]+)\"")
-                val appMatcher = appPattern.matcher(text)
+                val appPattern = Pattern.compile("app\\s*=\\s*\"([^\"]+)\"")
+                val appMatcher = appPattern.matcher(textToParse)
                 if (appMatcher.find()) {
                     appName = appMatcher.group(1)
                 }
 
                 // [新增] 匹配输入文本 text="..."
-                val textPattern = Pattern.compile("text=\"([^\"]+)\"")
-                val textMatcher = textPattern.matcher(text)
+                val textPattern = Pattern.compile("text\\s*=\\s*\"([^\"]+)\"")
+                val textMatcher = textPattern.matcher(textToParse)
                 if (textMatcher.find()) {
                     inputText = textMatcher.group(1)
                 }
 
                 return AgentCommand(thought = text, action = action, params = params, appName = appName, text = inputText)
-            } else if (text.contains("finish")) {
+            } else if (text.contains("finish", ignoreCase = true)) {
                 return AgentCommand(thought = text, action = "finish", params = emptyList())
             }
             return null
